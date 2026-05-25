@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Fama-French 三因素回归模块。"""
 import numpy as np
 import pandas as pd

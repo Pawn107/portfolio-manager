@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CAPM 回归模块 — 支持双市场基准 (美股→S&P500, A股→沪深300)。"""
 import numpy as np
 import pandas as pd

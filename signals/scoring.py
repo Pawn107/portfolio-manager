@@ -6,6 +6,8 @@ HOLD = 其余时间持有
 
 不再用技术指标做买入择时。
 """
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 from signals import indicators as ind

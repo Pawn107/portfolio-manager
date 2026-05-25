@@ -1,4 +1,6 @@
 """A股数据下载：mootdx (K线/财务) + 腾讯财经 (PE/PB/市值/换手率)。"""
+from __future__ import annotations
+
 import urllib.request
 import time
 import numpy as np

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CSV 文件缓存，TTL 24 小时。"""
 import pandas as pd
 from pathlib import Path

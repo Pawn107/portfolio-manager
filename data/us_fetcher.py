@@ -1,3 +1,4 @@
+from __future__ import annotations
 """美股数据下载：yfinance。"""
 import time
 import pandas as pd
