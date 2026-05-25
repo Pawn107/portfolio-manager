@@ -88,15 +88,16 @@ def model_r2_comparison(capm_df, multi_df, multi_label: str = "多因子 R²"):
 def efficient_frontier_chart(mu, cov, rf, ticker_names,
                               mc_rets, mc_vols, mc_sharpes,
                               frontier_rets, frontier_vols,
-                              eq_stats, mv_stats, ms_stats):
+                              eq_stats, mv_stats, ms_stats,
+                              n_mc: int = 10000):
     """有效前沿 + CML + 蒙特卡洛散点。"""
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
         x=mc_vols, y=mc_rets, mode="markers",
-        marker=dict(color=mc_sharpes, colorscale="RdYlGn", size=3, opacity=0.3,
+        marker=dict(color=mc_sharpes, colorscale="RdYlGn", size=4, opacity=0.4,
                     showscale=True, colorbar=dict(title="Sharpe")),
-        name="随机组合", showlegend=True,
+        name=f"蒙特卡洛模拟 (n={n_mc})", showlegend=True,
     ))
 
     fig.add_trace(go.Scatter(

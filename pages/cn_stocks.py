@@ -446,7 +446,8 @@ with tab2:
             fig_ef = efficient_frontier_chart(
                 mu, cov, rf_annual, ticker_names,
                 mc_rets, mc_vols, mc_sharpes,
-                f_rets, f_vols, eq_stats, mv_stats, ms_stats)
+                f_rets, f_vols, eq_stats, mv_stats, ms_stats,
+                n_mc=5000)
 
             # 加上手动组合点
             import plotly.graph_objects as go
