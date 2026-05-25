@@ -145,7 +145,7 @@ if run_ff3:
         with c2:
             if run_capm and not capm_df.empty:
                 common = capm_df.index.intersection(ff3_df.index)
-                fig_r2 = model_r2_comparison(capm_df.loc[common], ff3_df.loc[common])
+                fig_r2 = model_r2_comparison(capm_df.loc[common], ff3_df.loc[common], multi_label="FF3 R²")
                 st.plotly_chart(fig_r2, width="stretch", config={
                     "displayModeBar": True, "displaylogo": False,
                 })

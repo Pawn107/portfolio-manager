@@ -65,8 +65,8 @@ def ff3_factor_loadings(ff3_df):
     return _dark_fig(fig)
 
 
-def model_r2_comparison(capm_df, ff3_df):
-    """CAPM vs FF3 R² 对比图。"""
+def model_r2_comparison(capm_df, multi_df, multi_label: str = "多因子 R²"):
+    """CAPM vs 多因子模型 R² 对比图。"""
     tickers = capm_df.index.tolist()
     x = np.arange(len(tickers))
     w = 0.35
@@ -74,7 +74,7 @@ def model_r2_comparison(capm_df, ff3_df):
     fig = go.Figure()
     fig.add_trace(go.Bar(x=x - w/2, y=capm_df["r_squared"], name="CAPM R²",
                          marker_color=COLORS["blue"], width=w))
-    fig.add_trace(go.Bar(x=x + w/2, y=ff3_df["r_squared"], name="FF3 R²",
+    fig.add_trace(go.Bar(x=x + w/2, y=multi_df["r_squared"], name=multi_label,
                          marker_color=COLORS["orange"], width=w))
 
     fig.update_xaxes(tickvals=x.tolist(), ticktext=tickers)

@@ -1,4 +1,4 @@
-"""A股分析 — 信号扫描 · 持仓权重 · 回测 · 因子分析。"""
+"""A股分析 — 信号扫描 · 持仓权重 · 因子分析。"""
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -7,30 +7,29 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import CN_POOL, TICKER_NAMES, BACKTEST_CONFIG, TRADING_DAYS
+from config import CN_POOL, CH3_UNIVERSE
 from shared import inject_css, page_header
 from data.cn_fetcher import (
-    fetch_daily_kline, fetch_weekly_kline, tencent_quote,
-    fetch_csi300_returns, fetch_finance,
+    fetch_daily_kline, tencent_quote,
+    fetch_csi300_returns,
 )
-from data.ff3_fetcher import fetch_ff3_daily, get_rf_daily, get_mkt_excess
+from data.ff3_fetcher import fetch_ff3_daily, get_rf_daily
 from signals.scoring import compute_scores, latest_signal, signal_summary
-from signals.risk import check_entry, check_exit
-from domain.capm import run_capm_single, run_capm_batch
-from domain.fama_french import run_ff3_batch
+from signals.risk import check_entry
+from domain.capm import run_capm_batch
+from domain.ch3 import build_ch3_factors, run_ch3_batch
 from domain.portfolio import (
     annualize, min_variance, max_sharpe, portfolio_stats,
     efficient_frontier, monte_carlo,
 )
-from domain.backtest import run_backtest, benchmark_return
 from viz.charts import (
     capm_beta_alpha, ff3_factor_loadings, model_r2_comparison,
     efficient_frontier_chart, portfolio_weights_chart,
 )
-from viz.signal_charts import kline_with_signals, equity_curve_chart, signal_score_chart
+from viz.signal_charts import kline_with_signals, signal_score_chart
 
 inject_css()
-page_header("A股分析", "信号扫描 · 持仓权重 · 周频回测 · 因子分析")
+page_header("A股分析", "信号扫描 · 持仓权重 · 因子分析")
 
 # ── 侧边栏 ──
 with st.sidebar:
@@ -46,8 +45,6 @@ with st.sidebar:
     raw_codes = [t.strip() for t in cn_text.split("\n") if t.strip()]
     selected = [c for c in raw_codes if len(c) == 6 and c.isdigit()]
 
-    st.subheader("回测参数")
-    initial_capital = st.number_input("初始资金", 10000, 10000000, 100000, 10000)
 
     st.divider()
     if st.button("清除缓存并刷新"):
@@ -68,24 +65,33 @@ if not selected:
 def load_cn_data(codes):
     """加载所有选中股票的日K和估值数据。"""
     daily = {}
-    weekly = {}
     valuation = {}
     for code in codes:
         d = fetch_daily_kline(code)
         if d is not None:
             daily[code] = d
-        w = fetch_weekly_kline(code)
-        if w is not None:
-            weekly[code] = w
     # 批量获取估值
     val = tencent_quote(list(codes))
     for code in codes:
         if code in val:
             valuation[code] = val[code]
-    return daily, weekly, valuation
+    return daily, valuation
 
 
-daily_data, weekly_data, valuation = load_cn_data(tuple(selected))
+@st.cache_data(ttl=3600, show_spinner="加载CH-3因子构建数据...")
+def load_ch3_universe():
+    """加载 CH-3 因子构建所需的全部股票日K和估值。"""
+    all_codes = list(set(CH3_UNIVERSE))
+    daily = {}
+    for code in all_codes:
+        d = fetch_daily_kline(code)
+        if d is not None:
+            daily[code] = d
+    val = tencent_quote(all_codes)
+    return daily, val
+
+
+daily_data, valuation = load_cn_data(tuple(selected))
 
 if not daily_data:
     st.error("未能加载任何A股数据，请检查网络或 mootdx 连接。")
@@ -98,7 +104,7 @@ main_code = selected[0]
 # ═══════════════════════════════════════════════════════════
 # Tab 1: 信号扫描
 # ═══════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4 = st.tabs(["信号扫描", "持仓权重", "回测", "因子分析"])
+tab1, tab2, tab3 = st.tabs(["信号扫描", "持仓权重", "因子分析"])
 
 with tab1:
     st.subheader("信号扫描")
@@ -398,78 +404,9 @@ with tab2:
 
 
 # ═══════════════════════════════════════════════════════════
-# Tab 3: 回测
+# Tab 3: 因子分析 (CH-3 中国版三因子)
 # ═══════════════════════════════════════════════════════════
 with tab3:
-    st.subheader("周频回测")
-
-    bt_code = st.selectbox("选择回测股票", selected, key="bt_select")
-    df_w = weekly_data.get(bt_code)
-    df_d = daily_data.get(bt_code)
-
-    if df_w is None or df_w.empty:
-        st.warning(f"{bt_code} 无周K数据。")
-    else:
-        # 计算信号
-        with st.spinner("运行回测..."):
-            scores = compute_scores(df_d)
-            result = run_backtest(df_w, scores, initial_capital=initial_capital)
-            bench_ret = benchmark_return(df_w)
-            summary = result.summary()
-
-        val = valuation.get(bt_code, {})
-        val_name = val.get("name", bt_code)
-
-        # 回测指标
-        st.subheader(f"{val_name} ({bt_code}) 回测结果")
-
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("总交易次数", summary["total_trades"])
-        c2.metric("胜率", f"{summary['win_rate']:.1%}")
-        c3.metric("平均收益", f"{summary['avg_return']:.2%}")
-        c4.metric("盈亏比", f"{summary['profit_factor']:.2f}" if summary["profit_factor"] != float("inf") else "∞")
-        c5.metric("最大回撤", f"{summary['max_drawdown']:.2%}")
-        c6.metric("Sharpe", f"{summary['sharpe']:.2f}")
-
-        c1, c2 = st.columns(2)
-        c1.metric("策略年化收益", f"{summary['annual_return']:.2%}")
-        c2.metric("买入持有基准", f"{bench_ret:.2%}",
-                  delta=f"{summary['annual_return'] - bench_ret:.2%}")
-
-        # 资金曲线
-        fig_eq = equity_curve_chart(result, bench_ret,
-                                     title=f"{val_name} — 资金曲线")
-        st.plotly_chart(fig_eq, width="stretch", config={
-            "displayModeBar": True, "displaylogo": False,
-        })
-
-        # 交易明细
-        if result.trades:
-            with st.expander("交易明细"):
-                trade_rows = []
-                for t in result.trades:
-                    trade_rows.append({
-                        "入场日期": str(t["entry_date"])[:10],
-                        "入场价": f"{t['entry_price']:.2f}",
-                        "离场日期": str(t["exit_date"])[:10] if t["exit_date"] else "-",
-                        "离场价": f"{t['exit_price']:.2f}" if t["exit_price"] else "-",
-                        "盈亏": f"{t['pnl_pct']:.2%}" if t["pnl_pct"] else "-",
-                        "离场原因": t["exit_reason"] or "-",
-                    })
-                st.dataframe(pd.DataFrame(trade_rows), width="stretch", hide_index=True)
-
-        st.caption(
-            f"手续费: 买入 {BACKTEST_CONFIG['commission_buy']:.2%} | "
-            f"卖出 {BACKTEST_CONFIG['commission_sell']:.2%} | "
-            f"滑点 {BACKTEST_CONFIG['slippage']:.1%} | "
-            f"止损 {BACKTEST_CONFIG['stop_loss']:.0%} | 止盈 +{BACKTEST_CONFIG['take_profit']:.0%}"
-        )
-
-
-# ═══════════════════════════════════════════════════════════
-# Tab 4: 因子分析
-# ═══════════════════════════════════════════════════════════
-with tab4:
     st.subheader("因子分析")
 
     # 准备收益数据
@@ -487,24 +424,21 @@ with tab4:
 
         ff3 = fetch_ff3_daily()
         rf_daily = get_rf_daily(ff3)
-        mkt_excess = get_mkt_excess(ff3)
+
+        # 超额收益
+        excess_returns = returns_df.sub(rf_daily, axis=0)
 
         # 沪深300 基准
         csi300_ret = fetch_csi300_returns()
-
-        # 计算超额收益
-        excess_returns = returns_df.sub(rf_daily, axis=0)
-
-        # CSI300 超额收益
         cn_mkt_excess = None
         if csi300_ret is not None:
             cn_idx = csi300_ret.index.intersection(rf_daily.index)
             cn_mkt_excess = csi300_ret.loc[cn_idx].astype(float) - rf_daily.loc[cn_idx].astype(float)
             cn_mkt_excess = cn_mkt_excess.dropna()
 
-        # CAPM
+        # ── CAPM (单因子: 沪深300) ──
         st.subheader("CAPM 回归 (沪深300基准)")
-        capm_df = run_capm_batch(excess_returns, mkt_excess, cn_mkt_excess,
+        capm_df = run_capm_batch(excess_returns, None, cn_mkt_excess,
                                   cn_tickers=list(returns_df.columns))
 
         if not capm_df.empty:
@@ -526,46 +460,66 @@ with tab4:
         else:
             st.warning("CAPM 回归失败：数据不足。")
 
-        # FF3
-        st.subheader("Fama-French 三因素回归")
-        st.caption("注意：美国 FF3 因子对A股解释力有限，SMB/HML 因子载荷仅供参考。")
+        # ── CH-3 (三因子: A股本地市值+价值) ──
+        st.subheader("CH-3 中国版三因素回归")
+        st.caption("Liu, Stambaugh & Yuan (2019) — 剔除壳污染 + EP价值因子，本地化A股因子")
 
-        ff3_df = run_ff3_batch(excess_returns, ff3)
+        with st.spinner("构建CH-3因子中 (拉取约25只成分股数据)..."):
+            ch3_daily, ch3_val = load_ch3_universe()
+            ch3_factors = build_ch3_factors(ch3_daily, ch3_val)
 
-        if not ff3_df.empty:
-            # 警告低 R² 的 A 股
-            low_r2 = ff3_df[ff3_df["r_squared"] < 0.05]
-            if not low_r2.empty:
-                st.warning(
-                    f"⚠ {', '.join(low_r2.index)} 的FF3 R² < 0.05，"
-                    "美国因子不适用于A股，请参考上方CAPM（沪深300基准）结果。"
-                )
+        if ch3_factors is not None and len(ch3_factors) > 60:
+            ch3_df = run_ch3_batch(excess_returns, ch3_factors)
 
-            c1, c2 = st.columns(2)
-            with c1:
-                fig_ff3 = ff3_factor_loadings(ff3_df)
-                st.plotly_chart(fig_ff3, width="stretch", config={
-                    "displayModeBar": True, "displaylogo": False,
-                })
-            with c2:
-                if not capm_df.empty:
-                    common = capm_df.index.intersection(ff3_df.index)
-                    fig_r2 = model_r2_comparison(capm_df.loc[common], ff3_df.loc[common])
-                    st.plotly_chart(fig_r2, width="stretch", config={
+            if not ch3_df.empty:
+                c1, c2 = st.columns(2)
+                with c1:
+                    fig_ch3 = ff3_factor_loadings(ch3_df)
+                    fig_ch3.update_layout(title="CH-3 三因素因子载荷 (A股本地因子)")
+                    st.plotly_chart(fig_ch3, width="stretch", config={
                         "displayModeBar": True, "displaylogo": False,
                     })
+                with c2:
+                    if not capm_df.empty:
+                        common_ch3 = capm_df.index.intersection(ch3_df.index)
+                        fig_r2 = model_r2_comparison(
+                            capm_df.loc[common_ch3], ch3_df.loc[common_ch3],
+                            multi_label="CH-3 R²")
+                        fig_r2.update_layout(title="CAPM vs CH-3 拟合优度对比")
+                        st.plotly_chart(fig_r2, width="stretch", config={
+                            "displayModeBar": True, "displaylogo": False,
+                        })
 
-            display_ff3 = ff3_df[["beta_mkt", "beta_smb", "beta_hml",
-                                   "alpha_annual", "r_squared"]].copy()
-            display_ff3["alpha_annual"] = display_ff3["alpha_annual"].apply(
-                lambda x: f"{x*100:+.2f}%")
-            display_ff3 = display_ff3.rename(columns={
-                "beta_mkt": "β_Mkt", "beta_smb": "β_SMB", "beta_hml": "β_HML",
-                "alpha_annual": "Alpha(年化)", "r_squared": "R²",
-            })
-            st.dataframe(display_ff3, width="stretch")
+                display_ch3 = ch3_df[["beta_mkt", "beta_smb", "beta_hml",
+                                       "alpha_annual", "r_squared"]].copy()
+                display_ch3["alpha_annual"] = display_ch3["alpha_annual"].apply(
+                    lambda x: f"{x*100:+.2f}%")
+                display_ch3 = display_ch3.rename(columns={
+                    "beta_mkt": "β_Mkt", "beta_smb": "β_SMB(规模)",
+                    "beta_hml": "β_HML(价值)", "alpha_annual": "Alpha(年化)",
+                    "r_squared": "R²",
+                })
+                st.dataframe(display_ch3, width="stretch")
+
+                # CH-3 因子统计
+                with st.expander("CH-3 因子统计信息"):
+                    fstats = ch3_factors.describe()
+                    fc1, fc2, fc3 = st.columns(3)
+                    fc1.metric("因子构建股票数", len(ch3_daily))
+                    fc2.metric("因子观测天数", len(ch3_factors))
+                    fc3.metric("MKT日均收益", f"{ch3_factors['MKT'].mean()*100:.3f}%")
+
+                    st.caption(
+                        "**因子构建方法** (月频调仓):\n"
+                        "- MKT: 成分股等权平均日收益\n"
+                        "- SMB: 小盘组合 - 大盘组合 (剔除末30%壳污染, 市值中位数分界)\n"
+                        "- HML: 高EP组合 - 低EP组合 (EP=1/PE, 前30% vs 后30%)\n"
+                        "- 细分组合: SH(小盘价值), SL(小盘成长), BH(大盘价值), BL(大盘成长)"
+                    )
+            else:
+                st.warning("CH-3 回归失败：有效样本不足。")
         else:
-            st.warning("FF3 回归失败：数据不足。")
+            st.warning("CH-3 因子构建失败：成分股数据不足。")
 
 st.divider()
-st.caption("数据源: mootdx (K线) + 腾讯财经 (估值) + Kenneth French Data Library (FF3因子)")
+st.caption("数据源: mootdx (K线) + 腾讯财经 (估值) + CH-3 A股本地因子")

@@ -31,7 +31,7 @@ def fetch_kline(symbol: str, category: int = 4, offset: int = 500) -> pd.DataFra
         if df is None or df.empty:
             return None
         df = df.rename(columns={"datetime": "date"}).copy()
-        df["date"] = pd.to_datetime(df["date"])
+        df["date"] = pd.to_datetime(df["date"]).dt.normalize()
         df = df.set_index("date").sort_index()
         required = ["open", "high", "low", "close", "volume"]
         if not all(c in df.columns for c in required):
