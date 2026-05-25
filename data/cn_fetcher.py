@@ -1,46 +1,83 @@
-"""A股数据下载：mootdx (K线/财务) + 腾讯财经 (PE/PB/市值/换手率)。"""
+"""A股数据下载：东财 (K线) + 腾讯财经 (PE/PB/市值) + 新浪 (财务) + yfinance (沪深300)。
+
+全部 HTTP 协议，Streamlit Cloud 可用。
+"""
 from __future__ import annotations
 
 import urllib.request
-import time
+import urllib.parse
+import json
 import numpy as np
 import pandas as pd
-from mootdx.quotes import Quotes
-from config import MOTDX_SERVER
 from data.cache import get as cache_get, put as cache_put
 
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
-def _get_client():
-    """获取 mootdx 客户端。"""
-    return Quotes.factory(market="std", server=MOTDX_SERVER)
+
+def _http_get_json(url: str, referer: str = "") -> dict | None:
+    """通用 HTTP GET → JSON。"""
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", UA)
+    if referer:
+        req.add_header("Referer", referer)
+    try:
+        resp = urllib.request.urlopen(req, timeout=15)
+        return json.loads(resp.read().decode())
+    except Exception:
+        return None
+
+
+def _em_market(symbol: str) -> str:
+    """6位代码 → 东财市场代码 (1=沪, 0=深)。"""
+    return "1" if symbol.startswith(("6", "9")) else "0"
 
 
 # ════════════════════════════════════════════════════════════
-#  mootdx K线
+#  东财 K线 (HTTP, 替代 mootdx TCP)
 # ════════════════════════════════════════════════════════════
 
-def fetch_kline(symbol: str, category: int = 4, offset: int = 500) -> pd.DataFrame | None:
-    """下载K线数据。
+def _eastmoney_kline(symbol: str, klt: str = "101", count: int = 500) -> pd.DataFrame | None:
+    """东财 K 线 HTTP API。
 
     Args:
         symbol: 6位代码
-        category: 4=日线, 5=周线
-        offset: 获取最近多少根K线
+        klt: 101=日线, 102=周线, 103=月线
+        count: 获取多少根K线
     """
-    try:
-        client = _get_client()
-        df = client.bars(symbol=symbol, category=category, offset=offset)
-        if df is None or df.empty:
-            return None
-        df = df.rename(columns={"datetime": "date"}).copy()
-        df["date"] = pd.to_datetime(df["date"]).dt.normalize()
-        df = df.set_index("date").sort_index()
-        required = ["open", "high", "low", "close", "volume"]
-        if not all(c in df.columns for c in required):
-            return None
-        return df[required].astype(float)
-    except Exception:
+    secid = f"{_em_market(symbol)}.{symbol}"
+    params = {
+        "secid": secid, "klt": klt, "fqt": "1",
+        "end": "20500101", "lmt": str(count),
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56",
+    }
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.urlencode(params)
+
+    d = _http_get_json(url, referer="https://quote.eastmoney.com/")
+    if d is None:
         return None
+
+    klines = d.get("data", {}).get("klines", [])
+    if not klines:
+        return None
+
+    rows = []
+    for line in klines:
+        parts = line.split(",")
+        if len(parts) >= 6:
+            rows.append({
+                "date": parts[0],
+                "open": float(parts[1]),
+                "close": float(parts[2]),
+                "high": float(parts[3]),
+                "low": float(parts[4]),
+                "volume": float(parts[5]),
+            })
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    df = df.set_index("date").sort_index()
+    return df[["open", "high", "low", "close", "volume"]].astype(float)
 
 
 def fetch_daily_kline(symbol: str) -> pd.DataFrame | None:
@@ -50,7 +87,7 @@ def fetch_daily_kline(symbol: str) -> pd.DataFrame | None:
     if cached is not None and not cached.empty:
         return cached
 
-    df = fetch_kline(symbol, category=4, offset=500)
+    df = _eastmoney_kline(symbol, klt="101", count=500)
     if df is not None:
         cache_put(cache_key, df)
     return df
@@ -63,7 +100,7 @@ def fetch_weekly_kline(symbol: str) -> pd.DataFrame | None:
     if cached is not None and not cached.empty:
         return cached
 
-    df = fetch_kline(symbol, category=5, offset=200)
+    df = _eastmoney_kline(symbol, klt="102", count=200)
     if df is not None:
         cache_put(cache_key, df)
     return df
@@ -128,26 +165,59 @@ def tencent_quote(codes: list[str]) -> dict[str, dict]:
 
 
 # ════════════════════════════════════════════════════════════
-#  mootdx 财务快照
+#  新浪财报 — EPS/ROE/净利 (替代 mootdx finance)
 # ════════════════════════════════════════════════════════════
 
+_SINA_FINANCE_URL = (
+    "https://quotes.sina.cn/cn/api/openapi.php/"
+    "CompanyFinanceService.getFinanceReport2022"
+)
+
+
 def fetch_finance(symbol: str) -> dict | None:
-    """获取最新财务快照 (EPS, ROE, 净利等)。mootdx 字段为拼音缩写。"""
+    """获取最新财务快照 (EPS, ROE, 净利等)。使用新浪财报 HTTP API。"""
+    prefix = "sh" if symbol.startswith(("6", "9")) else "sz"
+    paper_code = f"{prefix}{symbol}"
+
     try:
-        client = _get_client()
-        fin = client.finance(symbol=symbol)
-        if fin is None or fin.empty:
+        # 利润表 → 净利润, 营收
+        lrb_params = urllib.parse.urlencode({
+            "paperCode": paper_code, "source": "lrb",
+            "type": "0", "page": "1", "num": "2",
+        })
+        lrb_d = _http_get_json(f"{_SINA_FINANCE_URL}?{lrb_params}")
+        if lrb_d is None:
             return None
-        row = fin.iloc[0]
+        lrb_list = lrb_d.get("result", {}).get("data", {}).get("lrb", [])
+        if not lrb_list:
+            return None
 
-        jinglirun = float(row.get("jinglirun", 0) or 0)        # 净利润
-        jingzichan = float(row.get("jingzichan", 0) or 0)      # 净资产
-        zongguben = float(row.get("zongguben", 0) or 0)        # 总股本
-        zhuyingshouru = float(row.get("zhuyingshouru", 0) or 0)  # 主营收入
+        latest_lrb = lrb_list[0]
+        jinglirun = float(latest_lrb.get("净利润", 0) or 0)
+        zhuyingshouru = float(latest_lrb.get("营业总收入", 0) or 0)
 
-        roe = (jinglirun / jingzichan * 100) if jingzichan > 0 else 0
-        eps = (jinglirun / zongguben) if zongguben > 0 else 0
-        bvps = (jingzichan / zongguben) if zongguben > 0 else 0
+        # 资产负债表 → 净资产, 总股本
+        fzb_params = urllib.parse.urlencode({
+            "paperCode": paper_code, "source": "fzb",
+            "type": "0", "page": "1", "num": "2",
+        })
+        fzb_d = _http_get_json(f"{_SINA_FINANCE_URL}?{fzb_params}")
+        if fzb_d is None:
+            return None
+        fzb_list = fzb_d.get("result", {}).get("data", {}).get("fzb", [])
+        if not fzb_list:
+            return None
+
+        latest_fzb = fzb_list[0]
+        jingzichan = float(latest_fzb.get("归属于母公司股东权益合计", 0) or 0)
+        zongguben = float(latest_fzb.get("实收资本（或股本）", 0) or 0)
+
+        if jingzichan <= 0 or zongguben <= 0:
+            return None
+
+        roe = (jinglirun / jingzichan * 100)
+        eps = (jinglirun / zongguben)
+        bvps = (jingzichan / zongguben)
 
         return {
             "eps": eps,
@@ -156,7 +226,7 @@ def fetch_finance(symbol: str) -> dict | None:
             "revenue": zhuyingshouru,
             "bvps": bvps,
             "net_assets": jingzichan,
-            "industry": str(row.get("industry", "") or ""),
+            "industry": "",
         }
     except Exception:
         return None

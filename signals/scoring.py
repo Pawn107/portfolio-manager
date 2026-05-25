@@ -46,7 +46,7 @@ def fundamental_score(valuation: dict, finance: dict | None = None) -> dict:
 
     Args:
         valuation: 腾讯财经数据 {pe_ttm, pb, mcap_yi, ...}
-        finance: mootdx 财务快照 {eps, roe, net_profit, ...}
+        finance: 财务快照 {eps, roe, net_profit, ...}
 
     Returns:
         {total_score, pe_score, pb_score, roe_score, mcap_score, details: [...]}
@@ -280,7 +280,7 @@ def compute_signals(df: pd.DataFrame,
     Args:
         df: 日K线 DataFrame
         valuation: 腾讯财经估值数据
-        finance: mootdx 财务快照
+        finance: 新浪财务快照
         market_breadth: 全市场涨跌家数
         entry_price: 持仓入场价 (None = 空仓)
         entry_date: 持仓入场日期

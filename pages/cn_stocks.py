@@ -67,7 +67,7 @@ with st.sidebar:
         st.rerun()
 
     st.caption(f"已选 {len(selected)} 只A股")
-    st.caption("数据源: mootdx + 腾讯财经")
+    st.caption("数据源: 东财 + 腾讯财经 + 新浪")
 
 if not selected:
     st.warning("请在侧边栏至少输入一个6位A股代码。")
@@ -107,7 +107,7 @@ def load_ch3_universe():
 daily_data, valuation = load_cn_data(tuple(selected))
 
 if not daily_data:
-    st.error("未能加载任何A股数据，请检查网络或 mootdx 连接。")
+    st.error("未能加载任何A股数据，请检查网络连接。")
     st.stop()
 
 # 主股票代码（单只分析时用）
@@ -151,7 +151,7 @@ with tab1:
                 if df_daily is not None and scan_code not in daily_data:
                     daily_data[scan_code] = df_daily
             if df_daily is None:
-                st.error(f"无法获取 {scan_code} 的K线数据，请检查代码是否正确或 mootdx 连接。")
+                st.error(f"无法获取 {scan_code} 的K线数据，请检查代码是否正确或网络连接。")
 
         if val is None:
             new_val = tencent_quote([scan_code])
@@ -591,4 +591,4 @@ with tab3:
             st.warning("CH-3 因子构建失败：成分股数据不足。")
 
 st.divider()
-st.caption("数据源: mootdx (K线) + 腾讯财经 (估值) + CH-3 A股本地因子")
+st.caption("数据源: 东财 (K线) + 腾讯财经 (估值) + CH-3 A股本地因子")

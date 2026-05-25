@@ -67,8 +67,8 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # ── 中文字体 (跨平台) ──
 CN_FONT = "Arial Unicode MS, Noto Sans SC, SimHei, sans-serif"
 
-# ── mootdx 服务器 ──
-MOTDX_SERVER = ("110.41.147.114", 7709)
+# ── 数据源 (全 HTTP，Streamlit Cloud 兼容) ──
+# K线: 东财 push2his | 估值: 腾讯财经 | 财务: 新浪
 
 # ── 回测参数 ──
 BACKTEST_CONFIG = {

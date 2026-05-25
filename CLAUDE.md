@@ -3,7 +3,7 @@
 ## 项目
 A股+美股持仓管理系统，覆盖"信号扫描 → 持仓权重 → 因子分析"全流程。
 - **看板**: `:8502` (Streamlit) | **Python**: 3.12
-- **数据源**: yfinance (美股) | mootdx + 腾讯财经 (A股) | CH-3 A股本地因子
+- **数据源**: yfinance (美股) | 东财 (K线) + 腾讯财经 (估值) + 新浪 (财务) | CH-3 A股本地因子
 
 ## 协作规则
 - **不要每次改完代码就用 Playwright 打开浏览器验证**，除非用户明确要求
@@ -19,7 +19,7 @@ pages/
 data/
   cache.py          → CSV 缓存, TTL 24h
   us_fetcher.py     → yfinance 美股下载
-  cn_fetcher.py     → mootdx K线 + 腾讯财经估值 + 沪深300
+  cn_fetcher.py     → 东财 K线 + 腾讯财经估值 + 新浪财务 + 沪深300
   ff3_fetcher.py    → FF3 因子 (French Data Library)
 domain/
   capm.py           → CAPM 回归 (双市场: S&P500 / 沪深300)
@@ -42,9 +42,9 @@ config.py           → 全局配置 + CH3_UNIVERSE
 ## A股数据方案
 | 数据 | 来源 | 方式 |
 |------|------|------|
-| 日K/周K | mootdx | TCP 7709, `client.bars(category=4/5)` |
+| 日K/周K | 东财 push2his | HTTP, 前复权 |
 | PE/PB/市值/换手率 | 腾讯财经 qt.gtimg.cn | HTTP GET, GBK解码 |
-| 财务快照 | mootdx finance | `client.finance(symbol)` |
+| 财务快照 | 新浪 quotes.sina.cn | HTTP, 利润表+资产负债表 |
 | 沪深300 | yfinance `000300.SS` | 日线close |
 | 无风险利率 | FF3 RF列 | French Data Library |
 

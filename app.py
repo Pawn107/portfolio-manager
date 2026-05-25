@@ -40,7 +40,7 @@ with col2:
     ### A股分析
     信号扫描 · 持仓权重 · 回测 · 因子分析
 
-    - mootdx + 腾讯财经数据
+    - 东财 + 腾讯财经 + 新浪数据
     - 多因子买卖信号
     - 周频回测 (含手续费)
     - 沪深300 基准
@@ -49,4 +49,4 @@ with col2:
         st.switch_page("pages/cn_stocks.py")
 
 st.divider()
-st.caption("数据源: yfinance (美股) | mootdx + 腾讯财经 (A股) | Kenneth French Data Library (FF3因子)")
+st.caption("数据源: yfinance (美股) | 东财·腾讯·新浪 (A股) | Kenneth French Data Library (FF3因子)")

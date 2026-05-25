@@ -6,5 +6,4 @@ yfinance>=0.2
 statsmodels>=0.14
 scipy>=1.10
 requests>=2.28
-mootdx>=0.10
 stockstats>=0.6
