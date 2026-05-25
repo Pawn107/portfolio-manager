@@ -31,12 +31,24 @@ from viz.signal_charts import kline_with_signals, signal_score_chart
 inject_css()
 page_header("A股分析", "信号扫描 · 持仓权重 · 因子分析")
 
+# ── URL 参数记忆：从 ?codes=600519,000333 读取默认股票 ──
+_default_codes = ["600519", "000333", "300750"]
+try:
+    url_codes = st.query_params.get("codes", "")
+    if url_codes:
+        _parsed = [c.strip() for c in url_codes.split(",") if len(c.strip()) == 6 and c.strip().isdigit()]
+        if _parsed:
+            _default_codes = _parsed
+except Exception:
+    pass
+
+cn_default = "\n".join(_default_codes)
+
 # ── 侧边栏 ──
 with st.sidebar:
     st.header("配置")
 
     st.subheader("A股代码")
-    cn_default = "\n".join(["600519", "000333", "300750"])
     cn_text = st.text_area(
         "输入6位代码，一行一个", cn_default,
         height=90,
@@ -45,6 +57,9 @@ with st.sidebar:
     raw_codes = [t.strip() for t in cn_text.split("\n") if t.strip()]
     selected = [c for c in raw_codes if len(c) == 6 and c.isdigit()]
 
+    # 股票列表变化时更新 URL
+    if selected and selected != _default_codes:
+        st.query_params["codes"] = ",".join(selected)
 
     st.divider()
     if st.button("清除缓存并刷新"):

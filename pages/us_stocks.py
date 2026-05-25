@@ -25,18 +25,33 @@ from viz.charts import (
 inject_css()
 page_header("美股分析", "CAPM · Fama-French 三因素 · Markowitz 最优投资组合")
 
+# ── URL 参数记忆 ──
+_default_codes = ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "META", "TSLA"]
+try:
+    url_codes = st.query_params.get("codes", "")
+    if url_codes:
+        _parsed = [c.strip().upper() for c in url_codes.split(",") if c.strip()]
+        if _parsed:
+            _default_codes = _parsed
+except Exception:
+    pass
+
+us_default = "\n".join(_default_codes)
+
 # ── 侧边栏 ──
 with st.sidebar:
     st.header("配置")
 
     st.subheader("美股代码")
-    us_default = "\n".join(["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "META", "TSLA"])
     us_text = st.text_area(
         "输入 yfinance 代码，一行一个", us_default,
         height=120,
         help="提示：" + ", ".join(list(US_POOL.keys())[:10]) + " …",
     )
     selected = [t.strip().upper() for t in us_text.split("\n") if t.strip()]
+
+    if selected and selected != _default_codes:
+        st.query_params["codes"] = ",".join(selected)
 
     col1, col2 = st.columns(2)
     with col1:
