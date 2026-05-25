@@ -371,7 +371,7 @@ with tab2:
                     manual_weights[i] = st.number_input(
                         f"{cname}",
                         min_value=0.0, max_value=100.0,
-                        value=round(float(w_ms[i]) * 100, 1),
+                        value=max(0.0, round(float(w_ms[i]) * 100, 1)),
                         step=0.5, key=f"wt_{code}"
                     ) / 100.0
         else:
