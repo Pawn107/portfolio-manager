@@ -59,16 +59,16 @@ with st.sidebar:
     with col2:
         end_date = st.date_input("结束日期", pd.to_datetime(END_DATE))
 
-    st.subheader("分析模型")
-    run_capm = st.checkbox("CAPM", value=True)
-    run_ff3 = st.checkbox("Fama-French 三因素", value=True)
-
     st.subheader("组合约束")
     allow_short = st.checkbox("允许做空", value=False)
     max_weight = st.slider("单票最大权重", 0.2, 1.0, 1.0, 0.05)
     n_mc = st.slider("MC 模拟次数", 1000, 50000, 10000, 1000)
 
     st.divider()
+    if st.button("清除缓存并刷新"):
+        st.cache_data.clear()
+        st.rerun()
+
     st.caption(f"已选 {len(selected)} 只美股")
     st.caption("数据源: yfinance + Kenneth French Data Library")
 
@@ -95,30 +95,33 @@ rf_daily = get_rf_daily(ff3)
 mkt_excess = get_mkt_excess(ff3)
 excess_returns = returns.sub(rf_daily, axis=0)
 
-# ── 概览 ──
-st.header("概览")
-
 mu, cov, rf_annual = annualize(returns, rf_daily)
 n_assets = len(returns.columns)
+ticker_names = returns.columns.tolist()
 bounds = (-1.0, 1.0) if allow_short else (0.0, min(max_weight, 1.0))
+latest_prices = {t: float(prices[t].dropna().iloc[-1]) for t in ticker_names}
 
+# ── 公共：最优权重计算 ──
 w_eq = np.ones(n_assets) / n_assets
 eq_stats = portfolio_stats(w_eq, mu, cov, rf_annual)
+
 w_mv = min_variance(cov, bounds)
 mv_stats = portfolio_stats(w_mv, mu, cov, rf_annual)
+
 w_ms = max_sharpe(mu, cov, rf_annual, bounds)
 ms_stats = portfolio_stats(w_ms, mu, cov, rf_annual)
 
-cols = st.columns(5)
-cols[0].metric("加载股票", n_assets)
-cols[1].metric("交易日数", len(returns))
-cols[2].metric("最大 Sharpe", f"{ms_stats['sharpe']:.2f}")
-cols[3].metric("最小波动", f"{mv_stats['vol']:.1%}")
-cols[4].metric("无风险利率", f"{rf_annual:.2%}")
+mc_rets, mc_vols, mc_sharpes = monte_carlo(mu, cov, rf_annual, n_portfolios=n_mc)
+f_rets, f_vols = efficient_frontier(mu, cov, bounds)
 
-# ── CAPM ──
-if run_capm:
-    st.header("CAPM 回归结果")
+# ═══════════════════════════════════════════════════════════
+#  Tabs
+# ═══════════════════════════════════════════════════════════
+tab1, tab2 = st.tabs(["因子分析", "持仓权重"])
+
+# ── Tab 1: 因子分析 ──
+with tab1:
+    st.subheader("CAPM 回归结果")
     st.caption("基准: S&P 500 (FF Mkt-RF)")
 
     capm_df = run_capm_batch(excess_returns, mkt_excess, None)
@@ -143,9 +146,9 @@ if run_capm:
     else:
         st.warning("CAPM 回归失败：数据不足。")
 
-# ── FF3 ──
-if run_ff3:
-    st.header("Fama-French 三因素回归")
+    st.divider()
+
+    st.subheader("Fama-French 三因素回归")
     st.caption("因子来源: Kenneth French Data Library")
 
     ff3_df = run_ff3_batch(excess_returns, ff3)
@@ -158,7 +161,7 @@ if run_ff3:
                 "displayModeBar": True, "displaylogo": False,
             })
         with c2:
-            if run_capm and not capm_df.empty:
+            if not capm_df.empty:
                 common = capm_df.index.intersection(ff3_df.index)
                 fig_r2 = model_r2_comparison(capm_df.loc[common], ff3_df.loc[common], multi_label="FF3 R²")
                 st.plotly_chart(fig_r2, width="stretch", config={
@@ -178,52 +181,146 @@ if run_ff3:
     else:
         st.warning("FF3 回归失败：数据不足。")
 
-# ── 投资组合优化 ──
-st.header("最优投资组合")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("最大 Sharpe 组合",
-          f"Sharpe: {ms_stats['sharpe']:.2f}",
-          f"收益 {ms_stats['ret']:.1%} | 波动 {ms_stats['vol']:.1%}")
-c2.metric("最小方差组合",
-          f"波动: {mv_stats['vol']:.1%}",
-          f"收益 {mv_stats['ret']:.1%} | Sharpe {mv_stats['sharpe']:.2f}")
-c3.metric("等权重组合",
-          f"Sharpe: {eq_stats['sharpe']:.2f}",
-          f"收益 {eq_stats['ret']:.1%} | 波动 {eq_stats['vol']:.1%}")
+# ── Tab 2: 持仓权重 ──
+with tab2:
+    st.caption(f"基于 {len(returns)} 个交易日 | 无风险利率 {rf_annual:.2%}")
 
-mc_rets, mc_vols, mc_sharpes = monte_carlo(mu, cov, rf_annual, n_portfolios=n_mc)
-f_rets, f_vols = efficient_frontier(mu, cov, bounds)
+    # ═══════════════════════════════════════
+    # 区域 1: 手动调仓
+    # ═══════════════════════════════════════
+    st.subheader("手动调仓")
 
-col_ef, col_wt = st.columns([2, 1])
+    tab_weight_mode = st.radio(
+        "输入方式", ["百分比权重", "持仓股数"],
+        horizontal=True, key="us_weight_mode"
+    )
 
-with col_ef:
-    ticker_names = returns.columns.tolist()
-    fig_ef = efficient_frontier_chart(
-        mu, cov, rf_annual, ticker_names,
-        mc_rets, mc_vols, mc_sharpes,
-        f_rets, f_vols, eq_stats, mv_stats, ms_stats)
-    st.plotly_chart(fig_ef, width="stretch", config={
-        "displayModeBar": True, "displaylogo": False,
-    })
+    manual_weights = np.zeros(n_assets)
+    manual_quantities = np.zeros(n_assets, dtype=int)
+    total_value = 100000.0
 
-with col_wt:
-    fig_wt = portfolio_weights_chart(ticker_names, w_mv, w_ms, w_eq)
-    st.plotly_chart(fig_wt, width="stretch", config={
-        "displayModeBar": True, "displaylogo": False,
-    })
+    if tab_weight_mode == "百分比权重":
+        cols_wt = st.columns(min(n_assets, 6))
+        for i, ticker in enumerate(ticker_names):
+            name = TICKER_NAMES.get(ticker, ticker)
+            with cols_wt[i % len(cols_wt)]:
+                manual_weights[i] = st.number_input(
+                    f"{ticker}",
+                    min_value=0.0, max_value=100.0,
+                    value=round(float(w_ms[i]) * 100, 1),
+                    step=0.5, key=f"us_wt_{ticker}"
+                ) / 100.0
+    else:
+        st.caption("输入每只股票的持仓股数，系统会根据最新价格计算权重")
+        total_value = st.number_input("总投入资金 ($)", 1000.0, 10000000.0, 100000.0, 1000.0,
+                                       key="us_total_capital")
+        cols_qt = st.columns(min(n_assets, 6))
+        for i, ticker in enumerate(ticker_names):
+            price = latest_prices.get(ticker, 0)
+            name = TICKER_NAMES.get(ticker, ticker)
+            with cols_qt[i % len(cols_qt)]:
+                manual_quantities[i] = st.number_input(
+                    f"{ticker} (@${price:.1f})",
+                    min_value=0, value=100, step=10, key=f"us_qt_{ticker}"
+                )
 
-with st.expander("最大 Sharpe 组合权重明细"):
-    wt_df = pd.DataFrame({
-        "股票": ticker_names,
-        "名称": [TICKER_NAMES.get(t, t) for t in ticker_names],
-        "最大Sharpe": w_ms,
-        "最小方差": w_mv,
-        "等权重": w_eq,
-    }).sort_values("最大Sharpe", ascending=False)
-    for col in ["最大Sharpe", "最小方差", "等权重"]:
-        wt_df[col] = wt_df[col].apply(lambda x: f"{x:.1%}")
-    st.dataframe(wt_df, width="stretch", hide_index=True)
+    # 计算手动组合
+    if tab_weight_mode == "百分比权重":
+        w_manual = manual_weights
+        w_manual = w_manual / w_manual.sum() if w_manual.sum() > 0 else w_manual
+    else:
+        pos_values = manual_quantities.astype(float) * np.array([latest_prices[t] for t in ticker_names])
+        w_manual = pos_values / pos_values.sum() if pos_values.sum() > 0 else np.ones(n_assets) / n_assets
+
+    manual_stats = portfolio_stats(w_manual, mu, cov, rf_annual)
+
+    # 手动组合指标卡片
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("年化收益", f"{manual_stats['ret']:.2%}",
+               delta=f"{manual_stats['ret'] - ms_stats['ret']:+.2%} vs 最优")
+    mc2.metric("年化波动", f"{manual_stats['vol']:.2%}",
+               delta=f"{manual_stats['vol'] - mv_stats['vol']:+.2%} vs 最小")
+    mc3.metric("Sharpe 比率", f"{manual_stats['sharpe']:.2f}",
+               delta=f"{manual_stats['sharpe'] - ms_stats['sharpe']:+.2f} vs 最大")
+    mc4.metric("总仓位", f"{w_manual.sum():.0%}",
+               delta=f"{w_manual.sum() - 1.0:+.0%}" if abs(w_manual.sum() - 1.0) > 0.001 else None)
+
+    # 手动组合权重明细
+    with st.expander("手动调仓权重明细"):
+        mw_rows = []
+        for i, ticker in enumerate(ticker_names):
+            name = TICKER_NAMES.get(ticker, ticker)
+            price = latest_prices.get(ticker, 0)
+            mw_rows.append({
+                "代码": ticker,
+                "名称": name,
+                "最新价": f"${price:.2f}",
+                "权重": f"{w_manual[i]:.1%}",
+                "股数": int(manual_quantities[i]) if tab_weight_mode == "持仓股数"
+                        else int(w_manual[i] * total_value / price) if price > 0 else 0,
+            })
+        st.dataframe(pd.DataFrame(mw_rows), width="stretch", hide_index=True)
+
+    st.divider()
+
+    # ═══════════════════════════════════════
+    # 区域 2: Markowitz 最优权重 (参考)
+    # ═══════════════════════════════════════
+    st.subheader("Markowitz 最优权重 (参考)")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("最大 Sharpe", f"{ms_stats['sharpe']:.2f}",
+              f"收益 {ms_stats['ret']:.1%} | 波动 {ms_stats['vol']:.1%}")
+    c2.metric("最小方差", f"{mv_stats['vol']:.1%}",
+              f"收益 {mv_stats['ret']:.1%} | Sharpe {mv_stats['sharpe']:.2f}")
+    c3.metric("等权重", f"{eq_stats['sharpe']:.2f}",
+              f"收益 {eq_stats['ret']:.1%} | 波动 {eq_stats['vol']:.1%}")
+
+    col_ef, col_wt = st.columns([2, 1])
+
+    with col_ef:
+        fig_ef = efficient_frontier_chart(
+            mu, cov, rf_annual, ticker_names,
+            mc_rets, mc_vols, mc_sharpes,
+            f_rets, f_vols, eq_stats, mv_stats, ms_stats)
+
+        import plotly.graph_objects as go
+        from viz.theme import COLORS
+        fig_ef.add_trace(go.Scatter(
+            x=[manual_stats["vol"]], y=[manual_stats["ret"]],
+            mode="markers",
+            marker=dict(color=COLORS["orange"], size=18, symbol="x-thin", line=dict(width=3)),
+            name=f"手动调仓 (SR={manual_stats['sharpe']:.2f})",
+        ))
+
+        st.plotly_chart(fig_ef, width="stretch", config={
+            "displayModeBar": True, "displaylogo": False,
+        })
+
+    with col_wt:
+        fig_wt = portfolio_weights_chart(ticker_names, w_mv, w_ms, w_eq)
+        st.plotly_chart(fig_wt, width="stretch", config={
+            "displayModeBar": True, "displaylogo": False,
+        })
+
+    # 权重对比表
+    with st.expander("最优权重 vs 手动权重对比"):
+        comp_rows = []
+        for i, ticker in enumerate(ticker_names):
+            name = TICKER_NAMES.get(ticker, ticker)
+            comp_rows.append({
+                "代码": ticker,
+                "名称": name,
+                "最大Sharpe": w_ms[i],
+                "最小方差": w_mv[i],
+                "等权重": w_eq[i],
+                "手动调仓": w_manual[i],
+            })
+        comp_df = pd.DataFrame(comp_rows).sort_values("手动调仓", ascending=False)
+        for col in ["最大Sharpe", "最小方差", "等权重", "手动调仓"]:
+            comp_df[col] = comp_df[col].apply(lambda x: f"{x:.1%}")
+        st.dataframe(comp_df, width="stretch", hide_index=True)
 
 st.divider()
-st.caption("数据来源: yfinance + Kenneth French Data Library | 基准: S&P 500 (FF Mkt-RF)")
+st.caption("数据源: yfinance + Kenneth French Data Library | 基准: S&P 500 (FF Mkt-RF)")
