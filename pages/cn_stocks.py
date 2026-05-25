@@ -251,15 +251,26 @@ with tab1:
             line=dict(color=COLORS["orange"], width=1.5), name="HMA50",
         ), row=1, col=1)
 
-        # 标注死叉点
+        # 标注金叉点 (买入信号)
+        golden = (hma20 > hma50) & (hma20.shift(1) <= hma50.shift(1))
+        golden_dates = df_plot.index[golden.values]
+        if len(golden_dates) > 0:
+            fig.add_trace(go.Scatter(
+                x=golden_dates, y=df_plot.loc[golden_dates, "low"] * 0.97,
+                mode="markers",
+                marker=dict(symbol="triangle-up", size=10, color=COLORS["red"]),
+                name="HMA金叉 (买入)",
+            ), row=1, col=1)
+
+        # 标注死叉点 (卖出信号)
         death = (hma20 < hma50) & (hma20.shift(1) >= hma50.shift(1))
         death_dates = df_plot.index[death.values]
         if len(death_dates) > 0:
-            death_prices = df_plot.loc[death_dates, "high"] * 1.02
             fig.add_trace(go.Scatter(
-                x=death_dates, y=death_prices, mode="markers",
+                x=death_dates, y=df_plot.loc[death_dates, "high"] * 1.03,
+                mode="markers",
                 marker=dict(symbol="triangle-down", size=10, color=COLORS["green"]),
-                name="HMA死叉",
+                name="HMA死叉 (卖出)",
             ), row=1, col=1)
 
         # 成交量
