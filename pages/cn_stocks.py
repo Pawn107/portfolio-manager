@@ -226,7 +226,9 @@ with tab1:
         from viz.theme import TEMPLATE, DARK_LAYOUT, COLORS
         from signals import indicators as ind
 
-        df_plot = df_daily.iloc[-120:].copy()
+        kline_days = st.slider("显示交易日数", 60, 500, 120, 20, key="kline_days",
+                               help="拖动调整K线图显示的交易日数量")
+        df_plot = df_daily.iloc[-kline_days:].copy()
         hma20 = ind.hma(df_plot["close"], 20)
         hma50 = ind.hma(df_plot["close"], 50)
 
@@ -236,8 +238,8 @@ with tab1:
         fig.add_trace(go.Candlestick(
             x=df_plot.index, open=df_plot["open"], high=df_plot["high"],
             low=df_plot["low"], close=df_plot["close"],
-            name="K线", increasing_line_color=COLORS["green"],
-            decreasing_line_color=COLORS["red"],
+            name="K线", increasing_line_color=COLORS["red"],
+            decreasing_line_color=COLORS["green"],
         ), row=1, col=1)
 
         fig.add_trace(go.Scatter(
@@ -256,13 +258,13 @@ with tab1:
             death_prices = df_plot.loc[death_dates, "high"] * 1.02
             fig.add_trace(go.Scatter(
                 x=death_dates, y=death_prices, mode="markers",
-                marker=dict(symbol="triangle-down", size=10, color=COLORS["red"]),
+                marker=dict(symbol="triangle-down", size=10, color=COLORS["green"]),
                 name="HMA死叉",
             ), row=1, col=1)
 
         # 成交量
-        vol_colors = [COLORS["red"] if df_plot["close"].iloc[i] < df_plot["open"].iloc[i]
-                      else COLORS["green"] for i in range(len(df_plot))]
+        vol_colors = [COLORS["green"] if df_plot["close"].iloc[i] < df_plot["open"].iloc[i]
+                      else COLORS["red"] for i in range(len(df_plot))]
         fig.add_trace(go.Bar(
             x=df_plot.index, y=df_plot["volume"], marker_color=vol_colors,
             name="成交量", showlegend=False,
@@ -275,6 +277,8 @@ with tab1:
         )
         fig.update_yaxes(title_text="价格", row=1, col=1)
         fig.update_yaxes(title_text="成交量", row=2, col=1)
+        # 隐藏周末/非交易日空白
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, width="stretch", config={
             "displayModeBar": True, "displaylogo": False,
         })

@@ -77,6 +77,8 @@ def kline_with_signals(df: pd.DataFrame, scores: pd.DataFrame,
     )
     fig.update_yaxes(title_text="价格", row=1, col=1)
     fig.update_yaxes(title_text="成交量", row=2, col=1)
+    # 隐藏周末/非交易日空白
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return _dark_fig(fig)
 
 
@@ -130,6 +132,8 @@ def equity_curve_chart(result, benchmark_ret: float = None,
     fig.update_layout(title=title, height=500)
     fig.update_yaxes(title_text="净值", row=1, col=1)
     fig.update_yaxes(title_text="回撤 %", row=2, col=1)
+    # 隐藏周末/非交易日空白
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return _dark_fig(fig)
 
 
@@ -166,4 +170,6 @@ def signal_score_chart(scores: pd.DataFrame, title: str = "信号得分走势") 
         title=title, height=400,
         yaxis_title="得分 (0-100)", yaxis_range=[0, 100],
     )
+    # 隐藏周末/非交易日空白
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return _dark_fig(fig)
