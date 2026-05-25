@@ -11,11 +11,10 @@ from config import CN_POOL, CH3_UNIVERSE
 from shared import inject_css, page_header
 from data.cn_fetcher import (
     fetch_daily_kline, tencent_quote,
-    fetch_csi300_returns,
+    fetch_csi300_returns, fetch_finance,
 )
 from data.ff3_fetcher import fetch_ff3_daily, get_rf_daily
-from signals.scoring import compute_scores, latest_signal, signal_summary
-from signals.risk import check_entry
+from signals.scoring import compute_signals
 from domain.capm import run_capm_batch
 from domain.ch3 import build_ch3_factors, run_ch3_batch
 from domain.portfolio import (
@@ -26,7 +25,6 @@ from viz.charts import (
     capm_beta_alpha, ff3_factor_loadings, model_r2_comparison,
     efficient_frontier_chart, portfolio_weights_chart,
 )
-from viz.signal_charts import kline_with_signals, signal_score_chart
 
 inject_css()
 page_header("A股分析", "信号扫描 · 持仓权重 · 因子分析")
@@ -161,76 +159,132 @@ with tab1:
             if val and scan_code not in valuation:
                 valuation[scan_code] = val
 
-        # 计算信号
-        with st.spinner("计算技术指标和信号..."):
-            scores = compute_scores(df_daily)
-            sig = latest_signal(scores)
-            summary = signal_summary(scores)
+        # 获取财务数据
+        fin = fetch_finance(scan_code)
+
+        # 计算信号（基本面 + 风控）
+        with st.spinner("分析基本面和技术风控..."):
+            signal_result = compute_signals(df_daily, valuation=val, finance=fin)
 
         val_name = val.get("name", scan_code) if val else scan_code
 
-        # 最新信号卡片
+        # ── 信号卡片 ──
         st.subheader(f"{val_name} ({scan_code})")
 
+        sig = signal_result["signal"]
+        sig_color_map = {"BUY": "#22c55e", "SELL": "#ef4444", "HOLD": "#f59e0b", "AVOID": "#6b7280"}
+        sig_icon_map = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡", "AVOID": "⚫"}
+
         cols = st.columns(5)
-        signal_color = {
-            "BUY": "green", "SELL": "red", "HOLD": "gray",
-        }
-        color = signal_color.get(sig["signal"], "gray")
-        cols[0].metric("最新信号", sig["signal"])
-        cols[1].metric("综合得分", f"{sig['total_score']:.1f} / 100")
-        cols[2].metric("最新收盘价", f"{sig['close']:.2f}")
+        cols[0].metric("综合信号", f"{sig_icon_map.get(sig, '')} {sig}")
+        cols[1].metric("最新收盘价", f"{signal_result['close']:.2f}")
         if val:
-            cols[3].metric("PE(TTM)", f"{val['pe_ttm']:.1f}" if val.get("pe_ttm") else "N/A")
+            cols[2].metric("PE(TTM)", f"{val['pe_ttm']:.1f}" if val.get("pe_ttm") else "N/A")
+            cols[3].metric("PB", f"{val['pb']:.2f}" if val.get("pb") else "N/A")
             cols[4].metric("总市值(亿)", f"{val['mcap_yi']:.0f}" if val.get("mcap_yi") else "N/A")
 
-        # 信号统计
-        st.caption(
-            f"统计: BUY {summary['buy_count']}天 ({summary['buy_pct']}%) | "
-            f"HOLD {summary['hold_count']}天 | "
-            f"SELL {summary['sell_count']}天 ({summary['sell_pct']}%)"
-        )
+        st.caption(f"判断依据: {signal_result['reason']}")
 
-        # K线 + 信号图
-        fig_kline = kline_with_signals(df_daily, scores,
-                                        title=f"{val_name} ({scan_code}) — K线与买卖信号")
-        st.plotly_chart(fig_kline, width="stretch", config={
-            "displayModeBar": True, "displaylogo": False,
-        })
+        # ── 基本面得分明细 ──
+        with st.expander("基本面得分明细"):
+            fs = signal_result["fundamental"]
+            fd_cols = st.columns(4)
+            fd_cols[0].metric("PE得分", f"{fs['pe_score']}/35", help=fs.get("details", [""])[0] if len(fs.get("details", [])) > 0 else "")
+            fd_cols[1].metric("PB得分", f"{fs['pb_score']}/25", help=fs.get("details", [""])[1] if len(fs.get("details", [])) > 1 else "")
+            fd_cols[2].metric("ROE得分", f"{fs['roe_score']}/25", help=fs.get("details", [""])[2] if len(fs.get("details", [])) > 2 else "")
+            fd_cols[3].metric("市值得分", f"{fs['mcap_score']}/15", help=fs.get("details", [""])[3] if len(fs.get("details", [])) > 3 else "")
 
-        # 信号得分走势
-        fig_score = signal_score_chart(scores, title=f"{val_name} — 信号得分走势")
-        st.plotly_chart(fig_score, width="stretch", config={
-            "displayModeBar": True, "displaylogo": False,
-        })
+            st.progress(fs["total_score"] / 100, text=f"基本面总分: {fs['total_score']}/100")
+            for d in fs.get("details", []):
+                st.caption(f"• {d}")
 
-        # 因子明细
-        with st.expander("最新因子得分明细"):
-            detail = sig.get("detail", {})
-            factor_names = {
-                "trend": "HMA趋势", "rsi": "RSI位置", "macd": "MACD交叉",
-                "volume": "量价关系", "volatility": "波动率情绪",
-                "amplitude": "振幅情绪", "volume_emotion": "量能情绪",
-            }
-            detail_rows = []
-            for k, v in detail.items():
-                max_score = {"trend": 25, "rsi": 15, "macd": 20, "volume": 15,
-                             "volatility": 10, "amplitude": 5, "volume_emotion": 10}.get(k, 0)
-                detail_rows.append({
-                    "因子": factor_names.get(k, k),
-                    "得分": f"{v:.1f} / {max_score}",
-                    "占比": f"{v/max_score*100:.0f}%" if max_score > 0 else "-",
-                })
-            st.dataframe(pd.DataFrame(detail_rows), width="stretch", hide_index=True)
-
-        # 入场检查
-        with st.expander("入场风控检查"):
-            pe = val.get("pe_ttm") if val else None
-            ok, reason = check_entry(df_daily, pe)
-            if ok:
-                st.success("✅ 入场条件满足")
+        # ── 技术风控状态 ──
+        with st.expander("技术风控状态"):
+            risk = signal_result["risk"]
+            if risk["signal"] == "SELL":
+                st.error(f"⚠️ 风控触发: {risk['reason']}")
             else:
-                st.error(f"❌ {reason}")
+                st.success(f"✅ {risk['reason']}")
+
+            if risk.get("risk_flags"):
+                for flag in risk["risk_flags"]:
+                    st.warning(f"• {flag}")
+            else:
+                st.caption("无风控警报")
+
+        # ── 市场环境 ──
+        with st.expander("市场环境 & 仓位建议"):
+            mkt = signal_result["market"]
+            mode_names = {"normal": "正常", "panic": "恐慌", "euphoria": "狂热"}
+            st.metric("市场状态", mode_names.get(mkt["mode"], mkt["mode"]))
+            st.metric("建议仓位", f"{mkt['suggested_position']:.0%}")
+            st.caption("数据源: 全市场涨跌家数（敬请期待）→ 目前默认正常模式")
+
+        # ── K线图 (含HMA趋势线) ──
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        from viz.theme import TEMPLATE, DARK_LAYOUT, COLORS
+        from signals import indicators as ind
+
+        df_plot = df_daily.iloc[-120:].copy()
+        hma20 = ind.hma(df_plot["close"], 20)
+        hma50 = ind.hma(df_plot["close"], 50)
+
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                            vertical_spacing=0.03, row_heights=[0.7, 0.3])
+
+        fig.add_trace(go.Candlestick(
+            x=df_plot.index, open=df_plot["open"], high=df_plot["high"],
+            low=df_plot["low"], close=df_plot["close"],
+            name="K线", increasing_line_color=COLORS["green"],
+            decreasing_line_color=COLORS["red"],
+        ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=df_plot.index, y=hma20, mode="lines",
+            line=dict(color=COLORS["blue"], width=1.5), name="HMA20",
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=df_plot.index, y=hma50, mode="lines",
+            line=dict(color=COLORS["orange"], width=1.5), name="HMA50",
+        ), row=1, col=1)
+
+        # 标注死叉点
+        death = (hma20 < hma50) & (hma20.shift(1) >= hma50.shift(1))
+        death_dates = df_plot.index[death.values]
+        if len(death_dates) > 0:
+            death_prices = df_plot.loc[death_dates, "high"] * 1.02
+            fig.add_trace(go.Scatter(
+                x=death_dates, y=death_prices, mode="markers",
+                marker=dict(symbol="triangle-down", size=10, color=COLORS["red"]),
+                name="HMA死叉",
+            ), row=1, col=1)
+
+        # 成交量
+        vol_colors = [COLORS["red"] if df_plot["close"].iloc[i] < df_plot["open"].iloc[i]
+                      else COLORS["green"] for i in range(len(df_plot))]
+        fig.add_trace(go.Bar(
+            x=df_plot.index, y=df_plot["volume"], marker_color=vol_colors,
+            name="成交量", showlegend=False,
+        ), row=2, col=1)
+
+        fig.update_layout(
+            template=TEMPLATE, **DARK_LAYOUT,
+            title=f"{val_name} ({scan_code}) — K线 + HMA趋势线",
+            height=550, xaxis_rangeslider_visible=False,
+        )
+        fig.update_yaxes(title_text="价格", row=1, col=1)
+        fig.update_yaxes(title_text="成交量", row=2, col=1)
+        st.plotly_chart(fig, width="stretch", config={
+            "displayModeBar": True, "displaylogo": False,
+        })
+
+        # ── 行业资金动向（敬请期待）──
+        st.divider()
+        st.caption("📊 **行业资金动向** — 敬请期待")
+        st.caption("追踪行业板块资金流入/流出，提前判断热点轮动方向。")
+        st.caption("数据就绪: 东财行业板块涨跌排名 · 概念板块排名 · 同花顺题材归因")
+        st.caption("等待后续迭代接入。")
 
 
 # ═══════════════════════════════════════════════════════════

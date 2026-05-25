@@ -227,3 +227,87 @@ def volatility_signal(df: pd.DataFrame, window: int = 20) -> pd.Series:
     result[spike.values & ~spike_new.values] = -1.0
 
     return pd.Series(result, index=df.index)
+
+
+# ════════════════════════════════════════════════════════════
+#  ADX — Average Directional Index (趋势强度)
+# ════════════════════════════════════════════════════════════
+
+def adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """ADX 趋势强度指标。值越高趋势越强，< 20 视为震荡市。"""
+    high, low, close = df["high"], df["low"], df["close"]
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+
+    atr_val = tr.ewm(span=period, adjust=False).mean()
+
+    up_move = high - high.shift()
+    down_move = low.shift() - low
+
+    plus_dm = pd.Series(0.0, index=df.index)
+    minus_dm = pd.Series(0.0, index=df.index)
+
+    mask_plus = (up_move > down_move) & (up_move > 0)
+    mask_minus = (down_move > up_move) & (down_move > 0)
+    plus_dm[mask_plus] = up_move[mask_plus]
+    minus_dm[mask_minus] = down_move[mask_minus]
+
+    plus_di = 100 * (plus_dm.ewm(span=period, adjust=False).mean() / atr_val)
+    minus_di = 100 * (minus_dm.ewm(span=period, adjust=False).mean() / atr_val)
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return dx.ewm(span=period, adjust=False).mean()
+
+
+def adx_change(adx_series: pd.Series, lookback: int = 5) -> pd.Series:
+    """ADX 变化率：正值=趋势加强，负值=趋势减弱。"""
+    return adx_series.diff(lookback)
+
+
+def _calc_di(df: pd.DataFrame, period: int = 14, direction: str = "plus") -> pd.Series:
+    """内部：计算 +DI 或 -DI。"""
+    high, low, close = df["high"], df["low"], df["close"]
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    atr_val = tr.ewm(span=period, adjust=False).mean()
+
+    up_move = high - high.shift()
+    down_move = low.shift() - low
+
+    if direction == "plus":
+        dm = pd.Series(0.0, index=df.index)
+        mask = (up_move > down_move) & (up_move > 0)
+        dm[mask] = up_move[mask]
+    else:
+        dm = pd.Series(0.0, index=df.index)
+        mask = (down_move > up_move) & (down_move > 0)
+        dm[mask] = down_move[mask]
+
+    return 100 * (dm.ewm(span=period, adjust=False).mean() / atr_val.replace(0, np.nan))
+
+
+# ════════════════════════════════════════════════════════════
+#  布林带 — Bollinger Bands
+# ════════════════════════════════════════════════════════════
+
+def bollinger_bands(series: pd.Series, period: int = 20, std: float = 2.0) -> pd.DataFrame:
+    """布林带。返回: middle, upper, lower, width, pct_b。"""
+    middle = series.rolling(window=period).mean()
+    std_val = series.rolling(window=period).std()
+    upper = middle + std * std_val
+    lower = middle - std * std_val
+    width = (upper - lower) / middle
+    pct_b = (series - lower) / (upper - lower).replace(0, np.nan)
+
+    return pd.DataFrame({
+        "middle": middle, "upper": upper, "lower": lower,
+        "width": width, "pct_b": pct_b,
+    }, index=series.index)

@@ -130,19 +130,30 @@ def tencent_quote(codes: list[str]) -> dict[str, dict]:
 # ════════════════════════════════════════════════════════════
 
 def fetch_finance(symbol: str) -> dict | None:
-    """获取最新财务快照 (EPS, ROE, 净利等)。"""
+    """获取最新财务快照 (EPS, ROE, 净利等)。mootdx 字段为拼音缩写。"""
     try:
         client = _get_client()
         fin = client.finance(symbol=symbol)
         if fin is None or fin.empty:
             return None
         row = fin.iloc[0]
+
+        jinglirun = float(row.get("jinglirun", 0) or 0)        # 净利润
+        jingzichan = float(row.get("jingzichan", 0) or 0)      # 净资产
+        zongguben = float(row.get("zongguben", 0) or 0)        # 总股本
+        zhuyingshouru = float(row.get("zhuyingshouru", 0) or 0)  # 主营收入
+
+        roe = (jinglirun / jingzichan * 100) if jingzichan > 0 else 0
+        eps = (jinglirun / zongguben) if zongguben > 0 else 0
+        bvps = (jingzichan / zongguben) if zongguben > 0 else 0
+
         return {
-            "eps": float(row.get("EPS", 0) or 0),
-            "roe": float(row.get("ROE", 0) or 0),
-            "net_profit": float(row.get("NETPROFIT", 0) or 0),
-            "revenue": float(row.get("INCOME", 0) or 0),
-            "bvps": float(row.get("BPS", 0) or 0),
+            "eps": eps,
+            "roe": roe,
+            "net_profit": jinglirun,
+            "revenue": zhuyingshouru,
+            "bvps": bvps,
+            "net_assets": jingzichan,
             "industry": str(row.get("industry", "") or ""),
         }
     except Exception:
