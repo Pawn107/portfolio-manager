@@ -40,7 +40,7 @@ with col2:
     ### A股分析
     信号扫描 · 持仓权重 · 回测 · 因子分析
 
-    - 东财 + 腾讯财经 + 新浪数据
+    - 东财 + 腾讯财经 + 新浪 + yfinance 数据
     - 多因子买卖信号
     - 周频回测 (含手续费)
     - 沪深300 基准
@@ -80,4 +80,4 @@ with st.expander("使用说明"):
       - 因子分析：CAPM（沪深300基准）+ CH-3 中国版三因子
     """)
 
-st.caption("数据源: yfinance (美股) | 东财·腾讯·新浪 (A股) | Kenneth French Data Library (FF3因子)")
+st.caption("数据源: yfinance (美股) | 东财·腾讯·新浪·yfinance (A股) | Kenneth French Data Library (FF3因子)")

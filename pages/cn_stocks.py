@@ -67,7 +67,7 @@ with st.sidebar:
         st.rerun()
 
     st.caption(f"已选 {len(selected)} 只A股")
-    st.caption("数据源: 东财 + 腾讯财经 + 新浪")
+    st.caption("数据源: 东财 + 腾讯财经 + 新浪 + yfinance")
 
 if not selected:
     st.warning("请在侧边栏至少输入一个6位A股代码。")
@@ -607,4 +607,4 @@ with tab3:
             st.warning("CH-3 因子构建失败：成分股数据不足。")
 
 st.divider()
-st.caption("数据源: 东财 (K线) + 腾讯财经 (估值) + CH-3 A股本地因子")
+st.caption("数据源: 东财/yfinance (K线) + 腾讯财经 (估值) + 新浪 (财务) + CH-3 A股本地因子")

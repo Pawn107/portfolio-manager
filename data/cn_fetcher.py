@@ -1,6 +1,6 @@
-"""A股数据下载：东财 (K线) + 腾讯财经 (PE/PB/市值) + 新浪 (财务) + yfinance (沪深300)。
+"""A股数据下载：东财/yfinance (K线) + 腾讯财经 (PE/PB/市值) + 新浪 (财务) + yfinance (沪深300)。
 
-全部 HTTP 协议，Streamlit Cloud 可用。
+东财优先，失败时 yfinance 兜底（适配海外/Cloud 环境）。
 """
 from __future__ import annotations
 
