@@ -51,7 +51,7 @@ def _eastmoney_kline(symbol: str, klt: str = "101", count: int = 500) -> pd.Data
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56",
     }
-    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.urlencode(params)
+    url = "http://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.urlencode(params)
 
     d = _http_get_json(url, referer="https://quote.eastmoney.com/")
     if d is None:
