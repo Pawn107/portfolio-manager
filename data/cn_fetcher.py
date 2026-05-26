@@ -80,30 +80,83 @@ def _eastmoney_kline(symbol: str, klt: str = "101", count: int = 500) -> pd.Data
     return df[["open", "high", "low", "close", "volume"]].astype(float)
 
 
+def _yfinance_kline(symbol: str, count: int = 500) -> pd.DataFrame | None:
+    """yfinance K线兜底 — 用于东财 API 不可达的海外环境。
+
+    A股 yfinance 代码: 沪={code}.SS, 深={code}.SZ。
+    """
+    import yfinance as yf
+
+    if symbol.startswith(("6", "9")):
+        ticker = f"{symbol}.SS"
+    else:
+        ticker = f"{symbol}.SZ"
+
+    try:
+        df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
+        if df.empty:
+            return None
+        # yfinance 返回 MultiIndex columns，取第一层
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)
+        df = df.rename(columns={"Open": "open", "High": "high",
+                                 "Low": "low", "Close": "close",
+                                 "Volume": "volume"})
+        df.index = df.index.tz_localize(None).normalize()
+        return df[["open", "high", "low", "close", "volume"]].astype(float).iloc[-count:]
+    except Exception:
+        return None
+
+
 def fetch_daily_kline(symbol: str) -> pd.DataFrame | None:
-    """获取日K线（缓存1小时）。"""
+    """获取日K线（缓存1小时）。东财优先，失败则用 yfinance 兜底。"""
     cache_key = f"cn_daily_{symbol}"
     cached = cache_get(cache_key, ttl_hours=1)
     if cached is not None and not cached.empty:
         return cached
 
     df = _eastmoney_kline(symbol, klt="101", count=500)
-    if df is not None:
+    if df is not None and not df.empty:
+        cache_put(cache_key, df)
+        return df
+
+    # 东财失败 → yfinance 兜底（Cloud 海外环境）
+    df = _yfinance_kline(symbol, count=500)
+    if df is not None and not df.empty:
         cache_put(cache_key, df)
     return df
 
 
 def fetch_weekly_kline(symbol: str) -> pd.DataFrame | None:
-    """获取周K线（缓存1小时）。"""
+    """获取周K线（缓存1小时）。东财优先，失败则用 yfinance 兜底。"""
     cache_key = f"cn_weekly_{symbol}"
     cached = cache_get(cache_key, ttl_hours=1)
     if cached is not None and not cached.empty:
         return cached
 
     df = _eastmoney_kline(symbol, klt="102", count=200)
-    if df is not None:
+    if df is not None and not df.empty:
         cache_put(cache_key, df)
-    return df
+        return df
+
+    # 东财失败 → yfinance 兜底
+    import yfinance as yf
+    tf = f"{symbol}.SS" if symbol.startswith(("6", "9")) else f"{symbol}.SZ"
+    try:
+        df = yf.download(tf, period="2y", interval="1wk", auto_adjust=True, progress=False)
+        if df.empty:
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)
+        df = df.rename(columns={"Open": "open", "High": "high",
+                                 "Low": "low", "Close": "close",
+                                 "Volume": "volume"})
+        df.index = df.index.tz_localize(None).normalize()
+        result = df[["open", "high", "low", "close", "volume"]].astype(float)
+        cache_put(cache_key, result)
+        return result
+    except Exception:
+        return None
 
 
 # ════════════════════════════════════════════════════════════
